@@ -1,99 +1,94 @@
 def get_top_sorted_users(user_id, df=df, user_item=user_item):
     '''
     INPUT:
-    user_id - (int)
-    df - (pandas dataframe) df as defined at the top of the notebook 
-    user_item - (pandas dataframe) matrix of users by articles: 
-            1's when a user has interacted with an article, 0 otherwise
-    
-            
+    user_id - (int) ID of the target user
+    df - (DataFrame) contains user-article interactions
+    user_item - (DataFrame) binary matrix of user-article interactions (1 = interacted, 0 = not)
+
     OUTPUT:
-    neighbors_df - (pandas dataframe) a dataframe with:
-                    neighbor_id - is a neighbor user_id
-                    similarity - measure of the similarity of each user to the provided user_id
-                    num_interactions - the number of articles viewed by the user - if a u
-                    
-    Other Details - sort the neighbors_df by the similarity and then by number of interactions where 
-                    highest of each is higher in the dataframe
-     
+    neighbors_df - (DataFrame) contains:
+        - neighbor_id: ID of similar users
+        - similarity: similarity score with the target user
+        - num_interactions: total number of article interactions for each neighbor
+
+    DESCRIPTION:
+    Calculates the dot product similarity between the target user and all other users.
+    Sorts the result by similarity and then by number of interactions in descending order.
     '''
-    # Your code here
     
-    # compute similarity of each user to the provided user_id 
-    similarity_dict = {}
-    
-    for index, col in user_item.iterrows():
-        similarity = np.dot(user_item.loc[user_id], user_item.loc[index])
-        similarity_dict[index] = similarity   
-        similarity_dict_df = pd.DataFrame.from_dict(similarity_dict, orient = 'index')
-    
-    similarity_dict_df.columns = ['similarity']
-    
-    # compute article interactions of each user to the provided user_id    
-    article_interactions_df = df.groupby('user_id').count()['article_id'].to_frame()
-    article_interactions_df.columns = ['# of article interactions']
-    
-    # concatenating the 2 series (similarity series, article interactions series) into 1 dataframe
-    neighbors_df = pd.concat([similarity_dict_df, article_interactions_df], axis=1)
-    neighbors_df['neighbor id'] = neighbors_df.index
-    neighbors_df.drop([user_id], inplace=True) 
-    neighbors_df = neighbors_df[['neighbor id', 'similarity', '# of article interactions']].sort_values(by=['similarity', '# of article interactions'], ascending=False)
-    
-    
-    return neighbors_df # Return the dataframe specified in the doc_string
+    # Calculate similarity scores between user_id and all other users
+    similarity_scores = {
+        other_user: np.dot(user_item.loc[user_id], user_item.loc[other_user])
+        for other_user in user_item.index if other_user != user_id
+    }
+
+    # Convert similarity scores to DataFrame
+    similarity_df = pd.DataFrame.from_dict(similarity_scores, orient='index', columns=['similarity'])
+
+    # Count article interactions for each user
+    interactions_df = df.groupby('user_id')['article_id'].count().to_frame()
+    interactions_df.columns = ['num_interactions']
+
+    # Combine into a single DataFrame
+    neighbors_df = similarity_df.join(interactions_df)
+    neighbors_df['neighbor_id'] = neighbors_df.index
+
+    # Sort by similarity and number of interactions (both descending)
+    neighbors_df = neighbors_df.sort_values(by=['similarity', 'num_interactions'], ascending=False)
+    neighbors_df = neighbors_df[['neighbor_id', 'similarity', 'num_interactions']]
+
+    return neighbors_df
+
 
 
 def user_user_recs_part2(user_id, m=10):
     '''
     INPUT:
-    user_id - (int) a user id
-    m - (int) the number of recommendations you want for the user
-    
-    OUTPUT:
-    recs - (list) a list of recommendations for the user by article id
-    rec_names - (list) a list of recommendations for the user by article title
-    
-    Description:
-    Loops through the users based on closeness to the input user_id
-    For each user - finds articles the user hasn't seen before and provides them as recs
-    Does this until m recommendations are found
-    
-    Notes:
-    * Choose the users that have the most total article interactions 
-    before choosing those with fewer article interactions.
+    user_id - (int) ID of the user to recommend articles for
+    m - (int) number of recommendations desired
 
-    * Choose articles with the articles with the most total interactions 
-    before choosing those with fewer total interactions. 
-   
+    OUTPUT:
+    recs - (list) recommended article IDs
+    rec_names - (list) recommended article titles
+
+    DESCRIPTION:
+    Finds the most similar users to the target user and recommends articles they have read
+    that the target user hasn't. Prioritizes users and articles with the most interactions.
     '''
-    # Your code here
     
-    # list of article ids and article names for input user_id
-    user_id_article_ids, user_id_article_names = get_user_articles(user_id, user_item=user_item)
-    user_id_article_ids = [float(i) for i in user_id_article_ids] # converting input user_id article ids to float values
-    
-    
-    # dataframe of most similar users for input user_id 
-    df_top_users = get_top_sorted_users(user_id, df=df, user_item=user_item)
-    
-    # getting number of article interactions
-    num_article_interactions = df.groupby('article_id').count()['user_id']
-    
-    # looping through users based on closeness to the input user_id
+    # Get articles already seen by the target user
+    seen_article_ids, _ = get_user_articles(user_id, user_item=user_item)
+    seen_article_ids = [float(article_id) for article_id in seen_article_ids]
+
+    # Get similar users sorted by similarity and activity
+    top_users = get_top_sorted_users(user_id, df=df, user_item=user_item)
+
+    # Get number of interactions for each article
+    article_popularity = df.groupby('article_id')['user_id'].count()
+
     recs = []
-    
-    for index, col in df_top_users.iterrows():
-        user_article_ids, user_article_names = get_user_articles(col['neighbor id'], user_item=user_item) # getting article ids for each user
-        user_article_ids = [float(i) for i in user_article_ids] # converting article ids to float values
-        new_recs = np.setdiff1d(user_article_ids, user_id_article_ids, assume_unique=True) # list of article id values present in user, but not in input user_id
-        recs_to_add = num_article_interactions.loc[new_recs].sort_values(ascending=False) # sorting list of interactions from highest to lowest value
-        recs_to_add_list = recs_to_add.index.values.tolist() # creating new recommendations list
-        [recs.append(x) for x in recs_to_add_list if x not in recs] # creating article id recommendation list with no duplicate article ids
-    
-        if len(recs) > m:
+
+    # Iterate through top similar users
+    for _, row in top_users.iterrows():
+        neighbor_id = row['neighbor_id']
+        neighbor_article_ids, _ = get_user_articles(neighbor_id, user_item=user_item)
+        neighbor_article_ids = [float(article_id) for article_id in neighbor_article_ids]
+
+        # Find new articles the target user hasn't seen
+        unseen_articles = np.setdiff1d(neighbor_article_ids, seen_article_ids, assume_unique=True)
+        sorted_unseen = article_popularity.loc[unseen_articles].sort_values(ascending=False)
+        new_recs = sorted_unseen.index.tolist()
+
+        # Add unique recommendations
+        for article_id in new_recs:
+            if article_id not in recs:
+                recs.append(article_id)
+                if len(recs) >= m:
+                    break
+        if len(recs) >= m:
             break
-    
-    recs = recs[:m]
+
+    # Get article titles
     rec_names = get_article_names(recs)
 
-    return recs, rec_names
+    return recs[:m], rec_names
